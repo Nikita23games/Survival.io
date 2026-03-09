@@ -1,0 +1,412 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess P2P - Lobby System</title>
+    <style>
+        :root {
+            --bg: #1a1a1b;
+            --panel: #2d2d2e;
+            --accent: #81b64c;
+            --white: #ebecd0;
+            --black: #779556;
+            --text: #ffffff;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container { width: 100%; max-width: 800px; padding: 20px; box-sizing: border-box; }
+        .screen { display: none; flex-direction: column; gap: 20px; width: 100%; }
+        .active { display: flex; }
+
+        .card { background: var(--panel); padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+
+        /* Lobby Slots */
+        .lobby-slots { display: flex; gap: 20px; justify-content: center; margin: 20px 0; }
+        .slot {
+            width: 150px; padding: 20px; border-radius: 10px; background: #3e3e3f;
+            text-align: center; border: 2px dashed #555; transition: 0.3s;
+        }
+        .slot.occupied { border-style: solid; border-color: var(--accent); background: rgba(129, 182, 76, 0.1); }
+        .slot img { width: 60px; height: 60px; border-radius: 50%; margin-bottom: 10px; background: #555; }
+
+        /* Controls */
+        textarea {
+            width: 100%; height: 60px; background: #121212; color: #81b64c;
+            border: 1px solid #444; border-radius: 6px; padding: 10px; font-size: 11px; resize: none;
+        }
+        button {
+            padding: 12px 24px; border: none; border-radius: 6px; background: var(--accent);
+            color: white; font-weight: bold; cursor: pointer; transition: 0.2s;
+        }
+        button:hover { filter: brightness(1.1); }
+        button:disabled { background: #555; cursor: not-allowed; }
+
+        .upload-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; margin: 15px 0; }
+        .upload-box { font-size: 11px; background: #3e3e3f; padding: 5px; border-radius: 4px; }
+
+        /* Board */
+        .board-container { transition: transform 0.1s; }
+        .shake { animation: shakeEffect 0.2s ease-in-out; }
+        @keyframes shakeEffect {
+            0%, 100% { transform: translate(0,0); }
+            25% { transform: translate(-4px, 4px); }
+            50% { transform: translate(4px, -4px); }
+            75% { transform: translate(-4px, -4px); }
+        }
+
+        .chess-grid {
+            display: grid; grid-template-columns: repeat(8, 1fr);
+            width: min(90vw, 500px); height: min(90vw, 500px);
+            border: 5px solid #333; margin: 0 auto;
+        }
+        .sq { display: flex; align-items: center; justify-content: center; position: relative; cursor: pointer; }
+        .sq.l { background: var(--white); }
+        .sq.d { background: var(--black); }
+        .sq.selected { background: rgba(255, 255, 0, 0.5) !important; }
+        .sq.hint::after { content: ''; width: 15px; height: 15px; background: rgba(0,0,0,0.1); border-radius: 50%; }
+        
+        .piece { width: 90%; height: 90%; object-fit: contain; pointer-events: none; }
+        
+        .status-bar { padding: 15px; background: #222; border-radius: 8px; text-align: center; margin-bottom: 10px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- Главное меню -->
+        <div id="menu-screen" class="screen active">
+            <div class="card" style="text-align: center;">
+                <h1 style="color: var(--accent);">Шахматы P2P</h1>
+                <p>Создайте комнату или присоединитесь к другу напрямую.</p>
+                <button onclick="initRole('host')">Создать комнату</button>
+                <button onclick="initRole('guest')" style="background: #444; margin-top: 10px;">Присоединиться</button>
+            </div>
+        </div>
+
+        <!-- Лобби -->
+        <div id="lobby-screen" class="screen">
+            <div class="card">
+                <h2>Лобби комнаты</h2>
+                <div class="lobby-slots">
+                    <div class="slot occupied" id="slot-1">
+                        <div style="font-size: 40px;">👑</div>
+                        <div>Создатель</div>
+                    </div>
+                    <div class="slot" id="slot-2">
+                        <div id="slot-2-icon" style="font-size: 40px; filter: grayscale(1);">👤</div>
+                        <div id="slot-2-text">Ожидание...</div>
+                    </div>
+                </div>
+
+                <div id="host-controls" style="display: none;">
+                    <h3>Настройка фигур:</h3>
+                    <div class="upload-grid" id="upload-grid"></div>
+                    <h3>Связь:</h3>
+                    <p style="font-size: 12px;">Отправьте этот код Игроку 2:</p>
+                    <textarea id="offer-out" readonly></textarea>
+                    <button onclick="copyText('offer-out')">Копировать код</button>
+                    <p style="font-size: 12px; margin-top: 15px;">Вставьте ответ от Игрока 2:</p>
+                    <textarea id="answer-in" placeholder="Вставьте ответ здесь..."></textarea>
+                    <button onclick="connectHost()">Подключить игрока</button>
+                </div>
+
+                <div id="guest-controls" style="display: none;">
+                    <h3>Присоединение:</h3>
+                    <p style="font-size: 12px;">Вставьте код от Создателя:</p>
+                    <textarea id="offer-in" placeholder="Код от создателя..."></textarea>
+                    <button onclick="guestGenerateAnswer()">Создать ответ</button>
+                    <div id="guest-answer-box" style="display: none; margin-top: 15px;">
+                        <p style="font-size: 12px;">Отправьте это Создателю:</p>
+                        <textarea id="answer-out" readonly></textarea>
+                        <button onclick="copyText('answer-out')">Копировать ответ</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Игра -->
+        <div id="game-screen" class="screen">
+            <div class="status-bar" id="game-status">Синхронизация...</div>
+            <div class="board-container" id="shaker">
+                <div class="chess-grid" id="board"></div>
+            </div>
+            <div style="text-align: center; margin-top: 15px;">
+                <button onclick="location.reload()" style="background: #cc3333; font-size: 12px;">Выйти из игры</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Состояние игры
+        let myRole = ''; 
+        let isConnected = false;
+        let peerConn, dataChannel;
+        let customImages = {};
+        let gameState = {
+            board: [],
+            turn: 'white',
+            lastMove: null
+        };
+
+        const rtcConfig = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+
+        // Инициализация роли
+        function initRole(role) {
+            myRole = (role === 'host') ? 'white' : 'black';
+            showScreen('lobby-screen');
+            
+            if (role === 'host') {
+                document.getElementById('host-controls').style.display = 'block';
+                setupHost();
+                createUploadInputs();
+            } else {
+                document.getElementById('guest-controls').style.display = 'block';
+            }
+        }
+
+        // --- WebRTC Сеть ---
+        function setupHost() {
+            peerConn = new RTCPeerConnection(rtcConfig);
+            dataChannel = peerConn.createDataChannel("chess");
+            setupChannel(dataChannel);
+
+            peerConn.onicecandidate = e => {
+                if (!e.candidate) {
+                    document.getElementById('offer-out').value = btoa(JSON.stringify(peerConn.localDescription));
+                }
+            };
+            peerConn.createOffer().then(d => peerConn.setLocalDescription(d));
+        }
+
+        async function guestGenerateAnswer() {
+            const offerStr = document.getElementById('offer-in').value;
+            if(!offerStr) return;
+            
+            peerConn = new RTCPeerConnection(rtcConfig);
+            peerConn.ondatachannel = e => setupChannel(e.channel);
+            
+            peerConn.onicecandidate = e => {
+                if (!e.candidate) {
+                    document.getElementById('answer-out').value = btoa(JSON.stringify(peerConn.localDescription));
+                    document.getElementById('guest-answer-box').style.display = 'block';
+                }
+            };
+
+            await peerConn.setRemoteDescription(new RTCSessionDescription(JSON.parse(atob(offerStr))));
+            const ans = await peerConn.createAnswer();
+            await peerConn.setLocalDescription(ans);
+        }
+
+        async function connectHost() {
+            const ansStr = document.getElementById('answer-in').value;
+            if(!ansStr) return;
+            await peerConn.setRemoteDescription(new RTCSessionDescription(JSON.parse(atob(ansStr))));
+        }
+
+        function setupChannel(chan) {
+            dataChannel = chan;
+            chan.onopen = () => {
+                isConnected = true;
+                updateLobbyStatus();
+                setTimeout(() => {
+                    showScreen('game-screen');
+                    if (myRole === 'white') {
+                        sendData({ type: 'init', board: gameState.board, images: customImages });
+                    }
+                }, 1000);
+            };
+            chan.onmessage = e => handleMessage(JSON.parse(e.data));
+        }
+
+        function sendData(obj) {
+            if (dataChannel && dataChannel.readyState === 'open') {
+                dataChannel.send(JSON.stringify(obj));
+            }
+        }
+
+        function handleMessage(data) {
+            if (data.type === 'init') {
+                gameState.board = data.board;
+                customImages = data.images;
+                renderBoard();
+            }
+            if (data.type === 'move') {
+                gameState.board = data.board;
+                gameState.turn = data.turn;
+                triggerShake();
+                saveGame();
+                renderBoard();
+            }
+        }
+
+        // --- Логика шахмат ---
+        function initBoard() {
+            const saved = localStorage.getItem('p2p_chess_save');
+            if (saved) {
+                gameState = JSON.parse(saved);
+            } else {
+                let b = Array(8).fill(null).map(() => Array(8).fill(null));
+                const pieces = ['r', 'n', 'b', 'q', 'k', 'b', 'n', 'r'];
+                for (let i = 0; i < 8; i++) {
+                    b[0][i] = { type: pieces[i], color: 'black' };
+                    b[1][i] = { type: 'p', color: 'black' };
+                    b[6][i] = { type: 'p', color: 'white' };
+                    b[7][i] = { type: pieces[i], color: 'white' };
+                }
+                gameState.board = b;
+            }
+        }
+
+        function saveGame() {
+            localStorage.setItem('p2p_chess_save', JSON.stringify(gameState));
+        }
+
+        let selectedSq = null;
+        let hints = [];
+
+        function renderBoard() {
+            const boardEl = document.getElementById('board');
+            boardEl.innerHTML = '';
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const sq = document.createElement('div');
+                    sq.className = `sq ${(r + c) % 2 === 0 ? 'l' : 'd'}`;
+                    if (selectedSq && selectedSq.r === r && selectedSq.c === c) sq.classList.add('selected');
+                    if (hints.some(h => h.r === r && h.c === c)) sq.classList.add('hint');
+
+                    const p = gameState.board[r][c];
+                    if (p) {
+                        const img = document.createElement('img');
+                        img.className = 'piece';
+                        img.src = customImages[`${p.color}_${p.type}`] || '';
+                        if (!img.src) { // Заглушка если нет фото
+                            sq.innerText = p.type.toUpperCase();
+                            sq.style.color = p.color === 'white' ? '#fff' : '#000';
+                        }
+                        sq.appendChild(img);
+                    }
+                    sq.onclick = () => onSquareClick(r, c);
+                    boardEl.appendChild(sq);
+                }
+            }
+            const status = document.getElementById('game-status');
+            status.innerText = (gameState.turn === myRole) ? "ВАШ ХОД" : "ОЖИДАНИЕ ХОДА ПРОТИВНИКА...";
+            status.style.color = (gameState.turn === myRole) ? "#81b64c" : "#fff";
+        }
+
+        function onSquareClick(r, c) {
+            if (gameState.turn !== myRole) return;
+
+            const move = hints.find(h => h.r === r && h.c === c);
+            if (move) {
+                gameState.board[r][c] = gameState.board[selectedSq.r][selectedSq.c];
+                gameState.board[selectedSq.r][selectedSq.c] = null;
+                gameState.turn = (myRole === 'white') ? 'black' : 'white';
+                
+                sendData({ type: 'move', board: gameState.board, turn: gameState.turn });
+                
+                selectedSq = null;
+                hints = [];
+                triggerShake();
+                saveGame();
+                renderBoard();
+                return;
+            }
+
+            const p = gameState.board[r][c];
+            if (p && p.color === myRole) {
+                selectedSq = { r, c };
+                hints = getSimpleMoves(r, c);
+            } else {
+                selectedSq = null;
+                hints = [];
+            }
+            renderBoard();
+        }
+
+        function getSimpleMoves(r, c) {
+            // Базовая демонстрационная логика: шаг в любую сторону
+            let m = [];
+            for (let dr = -1; dr <= 1; dr++) {
+                for (let dc = -1; dc <= 1; dc++) {
+                    if (dr === 0 && dc === 0) continue;
+                    let nr = r + dr, nc = c + dc;
+                    if (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
+                        const target = gameState.board[nr][nc];
+                        if (!target || target.color !== myRole) m.push({ r: nr, c: nc });
+                    }
+                }
+            }
+            return m;
+        }
+
+        // --- Утилиты ---
+        function showScreen(id) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(id).classList.add('active');
+        }
+
+        function updateLobbyStatus() {
+            const slot2 = document.getElementById('slot-2');
+            const icon = document.getElementById('slot-2-icon');
+            const text = document.getElementById('slot-2-text');
+            if (isConnected) {
+                slot2.classList.add('occupied');
+                icon.style.filter = 'none';
+                text.innerText = "Игрок 2 (Готов)";
+            }
+        }
+
+        function triggerShake() {
+            const el = document.getElementById('shaker');
+            el.classList.remove('shake');
+            void el.offsetWidth;
+            el.classList.add('shake');
+        }
+
+        function createUploadInputs() {
+            const container = document.getElementById('upload-grid');
+            const types = ['p', 'r', 'n', 'b', 'q', 'k'];
+            const labels = ['Пешка', 'Ладья', 'Конь', 'Слон', 'Ферзь', 'Король'];
+            types.forEach((t, i) => {
+                const div = document.createElement('div');
+                div.className = 'upload-box';
+                div.innerHTML = `${labels[i]}<br><input type="file" onchange="handleFile('${t}', this)">`;
+                container.appendChild(div);
+            });
+        }
+
+        window.handleFile = (type, input) => {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = e => {
+                // Применяем фото сразу для обеих сторон
+                customImages[`white_${type}`] = e.target.result;
+                customImages[`black_${type}`] = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        };
+
+        window.copyText = (id) => {
+            const el = document.getElementById(id);
+            el.select();
+            document.execCommand('copy');
+            alert("Код скопирован!");
+        };
+
+        window.onload = initBoard;
+    </script>
+</body>
+</html>
